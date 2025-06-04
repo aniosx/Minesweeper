@@ -5,11 +5,16 @@ from flask import Flask
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, CallbackContext
 import threading
+import time
 
-# إعداد التسجيل (Logging)
+# إعداد التسجيل (Logging) مع مستوى DEBUG لمزيد من التفاصيل
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    level=logging.DEBUG,
+    handlers=[
+        logging.StreamHandler(),  # إخراج السجلات إلى stdout (سيظهر في Render)
+        logging.FileHandler('bot.log')  # حفظ السجلات في ملف محلي للتحقق
+    ]
 )
 logger = logging.getLogger(__name__)
 
@@ -18,7 +23,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    logger.info("Received request to Flask endpoint")
+    logger.debug("Received request to Flask endpoint")
     return 'Minesweeper Bot is running!'
 
 # إعدادات اللعبة
@@ -28,6 +33,7 @@ games = {}  # قاموس لتخزين حالة اللعبة لكل مستخدم
 
 # إنشاء لوحة جديدة
 def create_board():
+    logger.debug("Creating new Minesweeper board")
     board = [[0 for _ in range(BOARD_SIZE)] for _ in range(BOARD_SIZE)]
     mines = set()
     while len(mines) < NUM_MINES:
@@ -47,6 +53,7 @@ def create_board():
 
 # إنشاء لوحة الأزرار
 def create_keyboard(game_id, display):
+    logger.debug(f"Creating keyboard for game_id: {game_id}")
     keyboard = []
     for i in range(BOARD_SIZE):
         row = []
@@ -113,30 +120,47 @@ def help_command(update: Update, context: CallbackContext):
 
 # الدالة الرئيسية لتشغيل البوت
 def main():
+    logger.debug("Entering main() function")
     token = os.environ.get('BOT_TOKEN')
     if not token:
         logger.error("BOT_TOKEN environment variable is not set")
         raise ValueError("BOT_TOKEN environment variable is not set")
-    logger.info("Starting Telegram bot polling")
+    logger.info(f"Using bot token: {token[:10]}... (truncated for security)")
     try:
+        logger.debug("Initializing Updater")
         updater = Updater(token, use_context=True)
         dp = updater.dispatcher
         dp.add_handler(CommandHandler('start', start))
         dp.add_handler(CommandHandler('help', help_command))
         dp.add_handler(CallbackQueryHandler(button))
-        updater.start_polling()
+        logger.debug("Starting polling")
+        updater.start_polling(poll_interval=1.0, timeout=10)
         logger.info("Telegram bot polling started successfully")
         updater.idle()
     except Exception as e:
-        logger.error(f"Failed to start Telegram bot: {str(e)}")
+        logger.error(f"Failed to start Telegram bot: {str(e)}", exc_info=True)
         raise
 
 # تشغيل البوت في خيط منفصل
 def run_bot():
-    main()
+    logger.debug("Starting run_bot thread")
+    try:
+        main()
+    except Exception as e:
+        logger.error(f"Error in run_bot thread: {str(e)}", exc_info=True)
 
 if __name__ == '__main__':
     logger.info("Starting Flask server and Telegram bot")
-    threading.Thread(target=run_bot).start()
-    port = int(os.environ.get('PORT', 8000))
-    app.run(host='0.0.0.0', port=port)
+    try:
+        # تشغيل البوت في خيط منفصل
+        bot_thread = threading.Thread(target=run_bot)
+        bot_thread.daemon = True  # جعل الخيط daemon ليغلق مع الخادم
+        bot_thread.start()
+        logger.debug("Bot thread started")
+        # تشغيل خادم Flask
+        port = int(os.environ.get('PORT', 8000))
+        logger.info(f"Starting Flask on port {port}")
+        app.run(host='0.0.0.0', port=port)
+    except Exception as e:
+        logger.error(f"Error starting application: {str(e)}", exc_info=True)
+        raise

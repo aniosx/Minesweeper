@@ -5,6 +5,8 @@ import requests
 from flask import Flask
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, CallbackContext
+import threading
+import time
 
 # إعداد التسجيل (Logging) مع مستوى DEBUG
 logging.basicConfig(
@@ -33,13 +35,28 @@ def test_telegram():
         logger.info(f"Telegram API test: Status {response.status_code}")
         return f"Telegram API test: Status {response.status_code}"
     except Exception as e:
-        logger.error(f"Telegram API test failed: {str(e)}")
+        logger.error(f"Telegram API test failed: {str(e)}", exc_info=True)
         return f"Telegram API test failed: {str(e)}"
+
+@app.route('/debug')
+def debug():
+    logger.debug("Received request to /debug endpoint")
+    token = os.environ.get('BOT_TOKEN', 'Not set')
+    status = {
+        'token_set': bool(token),
+        'token_preview': token[:10] + '...' if token else 'Not set',
+        'bot_running': bot_running,
+        'last_error': last_bot_error if 'last_bot_error' in globals() else 'None'
+    }
+    logger.info(f"Debug status: {status}")
+    return status
 
 # إعدادات اللعبة
 BOARD_SIZE = 8
 NUM_MINES = 10
-games = {}  # قاموس لتخزين حالة اللعبة لكل مستخدم
+games = {}  # قاموس لتخزين حالة اللعبة
+bot_running = False  # متغير لتتبع حالة البوت
+last_bot_error = None  # تخزين آخر خطأ
 
 # إنشاء لوحة جديدة
 def create_board():
@@ -49,7 +66,7 @@ def create_board():
     while len(mines) < NUM_MINES:
         x, y = random.randint(0, BOARD_SIZE-1), random.randint(0, BOARD_SIZE-1)
         mines.add((x, y))
-        board[x][y] = '💣'  # رمز اللغم
+        board[x][y] = '💣'
     for x, y in mines:
         for dx in [-1, 0, 1]:
             for dy in [-1, 0, 1]:
@@ -58,7 +75,7 @@ def create_board():
                 nx, ny = x + dx, y + dy
                 if 0 <= nx < BOARD_SIZE and 0 <= ny < BOARD_SIZE and board[nx][ny] != '💣':
                     board[nx][ny] += 1
-    display = ['⬜' for _ in range(BOARD_SIZE * BOARD_SIZE)]  # لوحة العرض
+    display = ['⬜' for _ in range(BOARD_SIZE * BOARD_SIZE)]
     return board, display
 
 # إنشاء لوحة الأزرار
@@ -73,7 +90,7 @@ def create_keyboard(game_id, display):
         keyboard.append(row)
     return InlineKeyboardMarkup(keyboard)
 
-# أمر /start لبدء اللعبة
+# أمر /start
 def start(update: Update, context: CallbackContext):
     user_id = update.effective_user.id
     logger.info(f"Received /start command from user {user_id}")
@@ -96,7 +113,7 @@ def button(update: Update, context: CallbackContext):
     display = games[user_id]['display']
 
     idx = x * BOARD_SIZE + y
-    if display[idx] != '⬜':  # الخلية مفتوحة بالفعل
+    if display[idx] != '⬜':
         return
 
     if board[x][y] == '💣':
@@ -108,14 +125,13 @@ def button(update: Update, context: CallbackContext):
     else:
         display[idx] = str(board[x][y]) if board[x][y] > 0 else '✅'
         query.message.edit_reply_markup(reply_markup=create_keyboard(game_id, display))
-        # التحقق من الفوز
         safe_cells = sum(1 for i in range(BOARD_SIZE) for j in range(BOARD_SIZE) if board[i][j] != '💣')
         opened_cells = sum(1 for cell in display if cell != '⬜')
         if opened_cells == safe_cells:
             games[user_id]['game_over'] = True
             query.message.reply_text('🎉 فزت! كشفت كل الخلايا الآمنة. ابدأ لعبة جديدة بـ /start')
 
-# أمر /help لعرض التعليمات
+# أمر /help
 def help_command(update: Update, context: CallbackContext):
     logger.info("Received /help command")
     update.message.reply_text(
@@ -130,11 +146,13 @@ def help_command(update: Update, context: CallbackContext):
 
 # الدالة الرئيسية لتشغيل البوت
 def main():
+    global bot_running, last_bot_error
     logger.debug("Entering main() function")
     token = os.environ.get('BOT_TOKEN')
     if not token:
         logger.error("BOT_TOKEN environment variable is not set")
-        raise ValueError("BOT_TOKEN environment variable is not set")
+        last_bot_error = "BOT_TOKEN environment variable is not set"
+        raise ValueError(last_bot_error)
     logger.info(f"Using bot token: {token[:10]}... (truncated for security)")
     try:
         logger.debug("Initializing Updater")
@@ -146,16 +164,34 @@ def main():
         logger.debug("Starting polling")
         updater.start_polling(poll_interval=1.0, timeout=10)
         logger.info("Telegram bot polling started successfully")
+        bot_running = True
         updater.idle()
     except Exception as e:
         logger.error(f"Failed to start Telegram bot: {str(e)}", exc_info=True)
+        last_bot_error = str(e)
+        bot_running = False
         raise
 
-if __name__ == '__main__':
-    logger.info("Starting application")
+# تشغيل البوت في خيط منفصل
+def run_bot():
+    logger.debug("Starting run_bot thread")
     try:
-        # تشغيل البوت مباشرة (بدون خيط منفصل)
         main()
+    except Exception as e:
+        logger.error(f"Error in run_bot thread: {str(e)}", exc_info=True)
+        global last_bot_error
+        last_bot_error = str(e)
+
+if __name__ == '__main__':
+    logger.info("Starting Flask server and Telegram bot")
+    try:
+        bot_thread = threading.Thread(target=run_bot)
+        bot_thread.daemon = True
+        bot_thread.start()
+        logger.debug("Bot thread started")
+        port = int(os.environ.get('PORT', 8000))
+        logger.info(f"Starting Flask on port {port}")
+        app.run(host='0.0.0.0', port=port)
     except Exception as e:
         logger.error(f"Error starting application: {str(e)}", exc_info=True)
         raise

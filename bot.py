@@ -103,7 +103,7 @@ def help_command(update: Update, context: CallbackContext):
 def main():
     # استبدل 'YOUR_BOT_TOKEN' بالتوكن الخاص بك
     token = os.environ.get('BOT_TOKEN', 'YOUR_BOT_TOKEN')
-    updater = Updater(tokenFacilitator(token, use_context=True)
+    updater = Updater(token, use_context=True)
     dp = updater.dispatcher
     dp.add_handler(CommandHandler('start', start))
     dp.add_handler(CommandHandler('help', help_command))

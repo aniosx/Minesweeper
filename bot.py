@@ -1,30 +1,40 @@
 import random
 import os
 import logging
+import requests
 from flask import Flask
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, CallbackContext
-import threading
-import time
 
-# إعداد التسجيل (Logging) مع مستوى DEBUG لمزيد من التفاصيل
+# إعداد التسجيل (Logging) مع مستوى DEBUG
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.DEBUG,
     handlers=[
-        logging.StreamHandler(),  # إخراج السجلات إلى stdout (سيظهر في Render)
-        logging.FileHandler('bot.log')  # حفظ السجلات في ملف محلي للتحقق
+        logging.StreamHandler(),  # إخراج السجلات إلى stdout (لـ Render)
+        logging.FileHandler('bot.log')  # حفظ السجلات في ملف (للتحقق المحلي)
     ]
 )
 logger = logging.getLogger(__name__)
 
-# إعداد Flask لتلبية متطلبات Render
+# إعداد Flask
 app = Flask(__name__)
 
 @app.route('/')
 def home():
     logger.debug("Received request to Flask endpoint")
     return 'Minesweeper Bot is running!'
+
+@app.route('/test-telegram')
+def test_telegram():
+    logger.debug("Testing Telegram API connectivity")
+    try:
+        response = requests.get('https://api.telegram.org')
+        logger.info(f"Telegram API test: Status {response.status_code}")
+        return f"Telegram API test: Status {response.status_code}"
+    except Exception as e:
+        logger.error(f"Telegram API test failed: {str(e)}")
+        return f"Telegram API test failed: {str(e)}"
 
 # إعدادات اللعبة
 BOARD_SIZE = 8
@@ -141,26 +151,11 @@ def main():
         logger.error(f"Failed to start Telegram bot: {str(e)}", exc_info=True)
         raise
 
-# تشغيل البوت في خيط منفصل
-def run_bot():
-    logger.debug("Starting run_bot thread")
-    try:
-        main()
-    except Exception as e:
-        logger.error(f"Error in run_bot thread: {str(e)}", exc_info=True)
-
 if __name__ == '__main__':
-    logger.info("Starting Flask server and Telegram bot")
+    logger.info("Starting application")
     try:
-        # تشغيل البوت في خيط منفصل
-        bot_thread = threading.Thread(target=run_bot)
-        bot_thread.daemon = True  # جعل الخيط daemon ليغلق مع الخادم
-        bot_thread.start()
-        logger.debug("Bot thread started")
-        # تشغيل خادم Flask
-        port = int(os.environ.get('PORT', 8000))
-        logger.info(f"Starting Flask on port {port}")
-        app.run(host='0.0.0.0', port=port)
+        # تشغيل البوت مباشرة (بدون خيط منفصل)
+        main()
     except Exception as e:
         logger.error(f"Error starting application: {str(e)}", exc_info=True)
         raise

@@ -1,15 +1,24 @@
 import random
 import os
+import logging
 from flask import Flask
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, CallbackContext
 import threading
+
+# إعداد التسجيل (Logging)
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
 # إعداد Flask لتلبية متطلبات Render
 app = Flask(__name__)
 
 @app.route('/')
 def home():
+    logger.info("Received request to Flask endpoint")
     return 'Minesweeper Bot is running!'
 
 # إعدادات اللعبة
@@ -50,6 +59,7 @@ def create_keyboard(game_id, display):
 # أمر /start لبدء اللعبة
 def start(update: Update, context: CallbackContext):
     user_id = update.effective_user.id
+    logger.info(f"Received /start command from user {user_id}")
     board, display = create_board()
     games[user_id] = {'board': board, 'display': display, 'game_over': False}
     update.message.reply_text('🎮 لعبة Minesweeper! انقر على الأزرار لكشف الخلايا.', reply_markup=create_keyboard(user_id, display))
@@ -59,6 +69,7 @@ def button(update: Update, context: CallbackContext):
     query = update.callback_query
     query.answer()
     user_id = query.from_user.id
+    logger.info(f"Button clicked by user {user_id}: {query.data}")
     if user_id not in games or games[user_id]['game_over']:
         query.message.reply_text('ابدأ لعبة جديدة باستخدام /start')
         return
@@ -89,6 +100,7 @@ def button(update: Update, context: CallbackContext):
 
 # أمر /help لعرض التعليمات
 def help_command(update: Update, context: CallbackContext):
+    logger.info("Received /help command")
     update.message.reply_text(
         '🎮 لعبة Minesweeper\n'
         'استخدم /start لبدء لعبة جديدة.\n'
@@ -101,21 +113,30 @@ def help_command(update: Update, context: CallbackContext):
 
 # الدالة الرئيسية لتشغيل البوت
 def main():
-    # استبدل 'YOUR_BOT_TOKEN' بالتوكن الخاص بك
-    token = os.environ.get('BOT_TOKEN', 'YOUR_BOT_TOKEN')
-    updater = Updater(token, use_context=True)
-    dp = updater.dispatcher
-    dp.add_handler(CommandHandler('start', start))
-    dp.add_handler(CommandHandler('help', help_command))
-    dp.add_handler(CallbackQueryHandler(button))
-    updater.start_polling()
-    updater.idle()
+    token = os.environ.get('BOT_TOKEN')
+    if not token:
+        logger.error("BOT_TOKEN environment variable is not set")
+        raise ValueError("BOT_TOKEN environment variable is not set")
+    logger.info("Starting Telegram bot polling")
+    try:
+        updater = Updater(token, use_context=True)
+        dp = updater.dispatcher
+        dp.add_handler(CommandHandler('start', start))
+        dp.add_handler(CommandHandler('help', help_command))
+        dp.add_handler(CallbackQueryHandler(button))
+        updater.start_polling()
+        logger.info("Telegram bot polling started successfully")
+        updater.idle()
+    except Exception as e:
+        logger.error(f"Failed to start Telegram bot: {str(e)}")
+        raise
 
 # تشغيل البوت في خيط منفصل
 def run_bot():
     main()
 
 if __name__ == '__main__':
+    logger.info("Starting Flask server and Telegram bot")
     threading.Thread(target=run_bot).start()
     port = int(os.environ.get('PORT', 8000))
     app.run(host='0.0.0.0', port=port)
